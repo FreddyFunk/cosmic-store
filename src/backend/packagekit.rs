@@ -353,7 +353,9 @@ impl Backend for Packagekit {
                 if package.id.is_system() {
                     for pkgname in &package.info.pkgnames {
                         if let Some(version) = version_map.get(pkgname) {
-                            package.extra.insert(format!("{}_installed", pkgname), version.clone());
+                            package
+                                .extra
+                                .insert(format!("{}_installed", pkgname), version.clone());
                         }
                     }
                 }

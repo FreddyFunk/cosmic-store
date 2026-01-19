@@ -753,7 +753,9 @@ impl CachedExploreResults {
                         // Create icon from cached path, or use default icon
                         let icon_opt = Some(match &c.icon_path {
                             Some(path) => widget::icon::from_path(std::path::PathBuf::from(path)),
-                            None => widget::icon::from_name("package-x-generic").size(128).handle(),
+                            None => widget::icon::from_name("package-x-generic")
+                                .size(128)
+                                .handle(),
                         });
                         SearchResult {
                             backend_name: backend_name_from_string(&c.backend_name),
@@ -799,12 +801,10 @@ fn preserve_icons_from(old_results: &[SearchResult], new_results: &mut [SearchRe
 
 /// Sort packages with system packages first, then alphabetically by name
 fn sort_packages_system_first(packages: &mut [(&'static str, Package)]) {
-    packages.sort_unstable_by(|a, b| {
-        match (a.1.id.is_system(), b.1.id.is_system()) {
-            (true, false) => cmp::Ordering::Less,
-            (false, true) => cmp::Ordering::Greater,
-            _ => LANGUAGE_SORTER.compare(&a.1.info.name, &b.1.info.name),
-        }
+    packages.sort_unstable_by(|a, b| match (a.1.id.is_system(), b.1.id.is_system()) {
+        (true, false) => cmp::Ordering::Less,
+        (false, true) => cmp::Ordering::Greater,
+        _ => LANGUAGE_SORTER.compare(&a.1.info.name, &b.1.info.name),
     });
 }
 
@@ -1235,18 +1235,22 @@ impl App {
         let start = Instant::now();
         let now = chrono::Utc::now().timestamp();
         let results = match explore_page {
-            ExplorePage::EditorsChoice => Self::generic_search(apps, backends, |id, _info, _installed| {
-                EDITORS_CHOICE
-                    .iter()
-                    .position(|choice_id| choice_id == &id.normalized())
-                    .map(|x| x as i64)
-            }),
-            ExplorePage::PopularApps => Self::generic_search(apps, backends, |_id, info, _installed| {
-                if !matches!(info.kind, AppKind::DesktopApplication) {
-                    return None;
-                }
-                Some(-(info.monthly_downloads as i64))
-            }),
+            ExplorePage::EditorsChoice => {
+                Self::generic_search(apps, backends, |id, _info, _installed| {
+                    EDITORS_CHOICE
+                        .iter()
+                        .position(|choice_id| choice_id == &id.normalized())
+                        .map(|x| x as i64)
+                })
+            }
+            ExplorePage::PopularApps => {
+                Self::generic_search(apps, backends, |_id, info, _installed| {
+                    if !matches!(info.kind, AppKind::DesktopApplication) {
+                        return None;
+                    }
+                    Some(-(info.monthly_downloads as i64))
+                })
+            }
             ExplorePage::MadeForCosmic => {
                 let provide = AppProvide::Id("com.system76.CosmicApplication".to_string());
                 Self::generic_search(apps, backends, |_id, info, _installed| {
@@ -1260,29 +1264,38 @@ impl App {
                     }
                 })
             }
-            ExplorePage::NewApps => Self::generic_search(apps, backends, |_id, _info, _installed| {
-                //TODO
-                None
-            }),
-            ExplorePage::RecentlyUpdated => Self::generic_search(apps, backends, |id, info, _installed| {
-                if !matches!(info.kind, AppKind::DesktopApplication) {
-                    return None;
-                }
-                let mut min_weight = 0;
-                for release in info.releases.iter() {
-                    if let Some(timestamp) = release.timestamp {
-                        if timestamp < now {
-                            let weight = -timestamp;
-                            if weight < min_weight {
-                                min_weight = weight;
+            ExplorePage::NewApps => {
+                Self::generic_search(apps, backends, |_id, _info, _installed| {
+                    //TODO
+                    None
+                })
+            }
+            ExplorePage::RecentlyUpdated => {
+                Self::generic_search(apps, backends, |id, info, _installed| {
+                    if !matches!(info.kind, AppKind::DesktopApplication) {
+                        return None;
+                    }
+                    let mut min_weight = 0;
+                    for release in info.releases.iter() {
+                        if let Some(timestamp) = release.timestamp {
+                            if timestamp < now {
+                                let weight = -timestamp;
+                                if weight < min_weight {
+                                    min_weight = weight;
+                                }
+                            } else {
+                                log::info!(
+                                    "{:?} has release timestamp {} which is past the present {}",
+                                    id,
+                                    timestamp,
+                                    now
+                                );
                             }
-                        } else {
-                            log::info!("{:?} has release timestamp {} which is past the present {}", id, timestamp, now);
                         }
                     }
-                }
-                Some(min_weight)
-            }),
+                    Some(min_weight)
+                })
+            }
             _ => {
                 let categories = explore_page.categories();
                 Self::category_search_indexed(apps, backends, category_index, categories)
@@ -2390,7 +2403,9 @@ impl App {
     }
 
     fn release_notes(&self, index: usize) -> Element<'_, Message> {
-        let cosmic_theme::Spacing { space_s, space_xxs, .. } = theme::active().cosmic().spacing;
+        let cosmic_theme::Spacing {
+            space_s, space_xxs, ..
+        } = theme::active().cosmic().spacing;
 
         // Check if this is a system package update
         if let Some(package) = self
@@ -2403,12 +2418,16 @@ impl App {
                 let refs: Vec<&str> = if !package.info.pkgnames.is_empty() {
                     package.info.pkgnames.iter().map(|s| s.as_str()).collect()
                 } else {
-                    package.info.flatpak_refs.iter().map(|s| s.as_str()).collect()
+                    package
+                        .info
+                        .flatpak_refs
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect()
                 };
 
                 // Display list of system packages with version info
-                let mut package_list = widget::column::with_capacity(refs.len())
-                    .spacing(space_xxs);
+                let mut package_list = widget::column::with_capacity(refs.len()).spacing(space_xxs);
 
                 for ref_name in refs {
                     let installed_version = package
@@ -3484,7 +3503,10 @@ impl Application for App {
         // Load cached explore results for instant display
         if let Some(cached) = CachedExploreResults::load() {
             app.explore_results = cached.to_results();
-            log::info!("loaded {} cached explore categories", app.explore_results.len());
+            log::info!(
+                "loaded {} cached explore categories",
+                app.explore_results.len()
+            );
         }
 
         if let Some(subcommand) = flags.subcommand_opt {
@@ -3652,11 +3674,16 @@ impl Application for App {
                             self.explore_results.insert(explore_page, search_results);
                             tasks.push(self.load_explore_icons(explore_page));
                         }
-                        log::info!("explore page ready with {} categories", self.explore_results.len());
+                        log::info!(
+                            "explore page ready with {} categories",
+                            self.explore_results.len()
+                        );
 
                         // Save to cache asynchronously for instant loading on next launch
-                        let cached =
-                            CachedExploreResults::from_results(&self.explore_results, &self.backends);
+                        let cached = CachedExploreResults::from_results(
+                            &self.explore_results,
+                            &self.backends,
+                        );
                         tasks.push(Task::perform(
                             async move {
                                 tokio::task::spawn_blocking(move || {
@@ -3757,12 +3784,10 @@ impl Application for App {
                     apply_icons_to_results(results, icons);
                 }
             }
-            Message::ExploreCacheSaved(result) => {
-                match result {
-                    Ok(()) => log::info!("saved explore cache"),
-                    Err(err) => log::warn!("failed to save explore cache: {}", err),
-                }
-            }
+            Message::ExploreCacheSaved(result) => match result {
+                Ok(()) => log::info!("saved explore cache"),
+                Err(err) => log::warn!("failed to save explore cache: {}", err),
+            },
             Message::GStreamerExit(code) => match self.mode {
                 Mode::Normal => {}
                 Mode::GStreamer { .. } => {
@@ -3835,10 +3860,7 @@ impl Application for App {
                     }
                     sort_packages_system_first(installed);
                     // Refresh installed results if on that page
-                    return Task::batch([
-                        self.installed_results(),
-                        self.update_homebrew_updates(),
-                    ]);
+                    return Task::batch([self.installed_results(), self.update_homebrew_updates()]);
                 }
             }
             Message::HomebrewUpdates(homebrew_packages) => {

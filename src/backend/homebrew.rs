@@ -160,10 +160,11 @@ impl Homebrew {
             e
         })?;
 
-        let outdated: BrewOutdatedOutput = serde_json::from_slice(&outdated_output).map_err(|e| {
-            log::error!("Failed to parse brew outdated JSON: {}", e);
-            e
-        })?;
+        let outdated: BrewOutdatedOutput =
+            serde_json::from_slice(&outdated_output).map_err(|e| {
+                log::error!("Failed to parse brew outdated JSON: {}", e);
+                e
+            })?;
 
         *cache = Some(BrewCache { info, outdated });
         Ok(())
@@ -281,7 +282,11 @@ impl Homebrew {
             info: Arc::new(AppInfo {
                 source_id: cache.source_id.clone(),
                 source_name: cache.source_name.clone(),
-                name: cask.name.first().cloned().unwrap_or_else(|| cask.token.clone()),
+                name: cask
+                    .name
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| cask.token.clone()),
                 summary: cask.desc.clone().unwrap_or_default(),
                 description: cask.desc.clone().unwrap_or_default(),
                 pkgnames: vec![cask.token.clone()],
@@ -301,8 +306,14 @@ impl Homebrew {
     fn outdated_cask_to_package(&self, cask: &BrewOutdatedCask) -> Package {
         let cache = &self.appstream_caches[0];
         let mut extra = HashMap::new();
-        extra.insert(format!("{}_installed", cask.name), cask.installed_versions.clone());
-        extra.insert(format!("{}_update", cask.name), cask.current_version.clone());
+        extra.insert(
+            format!("{}_installed", cask.name),
+            cask.installed_versions.clone(),
+        );
+        extra.insert(
+            format!("{}_update", cask.name),
+            cask.current_version.clone(),
+        );
 
         Package {
             id: AppId::new(&format!("homebrew-cask-{}", cask.name)),
