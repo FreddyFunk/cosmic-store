@@ -3538,7 +3538,7 @@ impl Application for App {
     }
 
     fn on_nav_select(&mut self, id: widget::nav_bar::Id) -> Task<Message> {
-        self.category_results = None;
+        // Note: Don't clear category_results here to avoid flicker - new results will replace
         self.explore_page_opt = None;
         self.search_active = false;
         self.search_results = None;
@@ -3677,7 +3677,21 @@ impl Application for App {
 
                 return Task::batch(tasks);
             }
-            Message::CategoryResults(categories, results) => {
+            Message::CategoryResults(categories, mut results) => {
+                // Preserve icons from old results to avoid flicker
+                if let Some((_, old_results)) = &self.category_results {
+                    let old_icons: std::collections::HashMap<_, _> = old_results
+                        .iter()
+                        .filter_map(|r| r.icon_opt.as_ref().map(|icon| (&r.id, icon)))
+                        .collect();
+                    for result in &mut results {
+                        if result.icon_opt.is_none() {
+                            if let Some(icon) = old_icons.get(&result.id) {
+                                result.icon_opt = Some((*icon).clone());
+                            }
+                        }
+                    }
+                }
                 self.category_results = Some((categories, results));
                 // Load icons in background
                 return Task::batch([self.update_scroll(), self.load_category_icons(categories)]);
