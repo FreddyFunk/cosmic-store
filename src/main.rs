@@ -3598,8 +3598,7 @@ impl Application for App {
             Message::Backends(backends) => {
                 self.backends = backends;
                 self.repos_changing.clear();
-                // Clear cached results since app catalog may have changed
-                self.explore_results.clear();
+                // Note: Don't clear explore_results to avoid flicker - fresh results will overwrite
                 self.category_results = None;
                 self.installed_results = None;
 
@@ -3631,7 +3630,23 @@ impl Application for App {
                             .collect();
 
                         // Store results and queue icon loading
-                        for (explore_page, search_results) in results {
+                        // Preserve icons from cached results to avoid flicker
+                        for (explore_page, mut search_results) in results {
+                            if let Some(old_results) = self.explore_results.get(&explore_page) {
+                                // Build a map of old icons by app id
+                                let old_icons: std::collections::HashMap<_, _> = old_results
+                                    .iter()
+                                    .filter_map(|r| r.icon_opt.as_ref().map(|icon| (&r.id, icon)))
+                                    .collect();
+                                // Copy icons to new results for matching apps
+                                for result in &mut search_results {
+                                    if result.icon_opt.is_none() {
+                                        if let Some(icon) = old_icons.get(&result.id) {
+                                            result.icon_opt = Some((*icon).clone());
+                                        }
+                                    }
+                                }
+                            }
                             self.explore_results.insert(explore_page, search_results);
                             tasks.push(self.load_explore_icons(explore_page));
                         }
