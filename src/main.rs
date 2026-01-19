@@ -750,9 +750,10 @@ impl CachedExploreResults {
                 let results: Vec<_> = cached_results
                     .iter()
                     .map(|c| {
-                        // Create icon from cached path if available
-                        let icon_opt = c.icon_path.as_ref().map(|path| {
-                            widget::icon::from_path(std::path::PathBuf::from(path))
+                        // Create icon from cached path, or use default icon
+                        let icon_opt = Some(match &c.icon_path {
+                            Some(path) => widget::icon::from_path(std::path::PathBuf::from(path)),
+                            None => widget::icon::from_name("package-x-generic").size(128).handle(),
                         });
                         SearchResult {
                             backend_name: backend_name_from_string(&c.backend_name),
