@@ -1,5 +1,4 @@
 use cosmic::widget;
-use rayon::prelude::*;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
