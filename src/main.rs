@@ -278,6 +278,8 @@ pub enum Message {
     GStreamerExit(GStreamerExitCode),
     GStreamerInstall,
     GStreamerToggle(usize),
+    HomebrewInstalled(Vec<Package>),
+    HomebrewUpdates(Vec<Package>),
     Installed(Vec<(&'static str, Package)>),
     InstalledResults(Vec<SearchResult>),
     InstalledIconsLoaded(Vec<(usize, widget::icon::Handle)>),
@@ -1802,8 +1804,10 @@ impl App {
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
+                    // Skip homebrew here - it loads in background via update_homebrew()
                     let mut installed: Vec<_> = backends
                         .par_iter()
+                        .filter(|(backend_name, _)| **backend_name != "homebrew")
                         .flat_map(|(backend_name, backend)| {
                             let start = Instant::now();
                             let result: Vec<_> = match backend.installed() {
@@ -1846,8 +1850,10 @@ impl App {
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
+                    // Skip homebrew here - it loads in background via update_homebrew()
                     let mut updates: Vec<_> = backends
                         .par_iter()
+                        .filter(|(backend_name, _)| **backend_name != "homebrew")
                         .flat_map(|(backend_name, backend)| {
                             let start = Instant::now();
                             let result: Vec<_> = match backend.updates() {
@@ -1875,6 +1881,76 @@ impl App {
                         }
                     });
                     action::app(Message::Updates(updates))
+                })
+                .await
+                .unwrap_or(action::none())
+            },
+            |x| x,
+        )
+    }
+
+    /// Load homebrew installed in background (non-blocking for explore page)
+    fn update_homebrew(&self) -> Task<Message> {
+        let backends = self.backends.clone();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let homebrew = match backends.get("homebrew") {
+                        Some(backend) => backend,
+                        None => return action::none(),
+                    };
+
+                    let start = Instant::now();
+                    let installed = match homebrew.installed() {
+                        Ok(packages) => packages,
+                        Err(err) => {
+                            log::error!("failed to list homebrew installed: {}", err);
+                            Vec::new()
+                        }
+                    };
+                    let duration = start.elapsed();
+                    log::info!(
+                        "loaded homebrew installed in background: {} packages in {:?}",
+                        installed.len(),
+                        duration
+                    );
+
+                    action::app(Message::HomebrewInstalled(installed))
+                })
+                .await
+                .unwrap_or(action::none())
+            },
+            |x| x,
+        )
+    }
+
+    /// Load homebrew updates in background
+    fn update_homebrew_updates(&self) -> Task<Message> {
+        let backends = self.backends.clone();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let homebrew = match backends.get("homebrew") {
+                        Some(backend) => backend,
+                        None => return action::none(),
+                    };
+
+                    let start = Instant::now();
+                    let updates = match homebrew.updates() {
+                        Ok(packages) => packages,
+                        Err(err) => {
+                            log::error!("failed to list homebrew updates: {}", err);
+                            Vec::new()
+                        }
+                    };
+                    let duration = start.elapsed();
+                    log::info!(
+                        "loaded homebrew updates in background: {} packages in {:?}",
+                        updates.len(),
+                        duration
+                    );
+
+                    action::app(Message::HomebrewUpdates(updates))
                 })
                 .await
                 .unwrap_or(action::none())
@@ -3390,8 +3466,10 @@ impl Application for App {
                 self.explore_results.clear();
                 self.category_results = None;
                 self.installed_results = None;
-                let mut tasks = Vec::with_capacity(2);
+                let mut tasks = Vec::with_capacity(3);
                 tasks.push(self.update_installed());
+                // Load homebrew in background - it's slow and only affects installed/updates
+                tasks.push(self.update_homebrew());
                 match self.mode {
                     Mode::Normal => {
                         tasks.push(self.update_updates());
@@ -3539,6 +3617,49 @@ impl Application for App {
                     }
                 }
             },
+            Message::HomebrewInstalled(homebrew_packages) => {
+                // Merge homebrew packages into installed list
+                if let Some(installed) = &mut self.installed {
+                    for package in homebrew_packages {
+                        installed.push(("homebrew", package));
+                    }
+                    // Re-sort with system packages first
+                    installed.sort_unstable_by(|a, b| {
+                        let a_is_system = a.1.id.is_system();
+                        let b_is_system = b.1.id.is_system();
+                        if a_is_system && !b_is_system {
+                            cmp::Ordering::Less
+                        } else if b_is_system && !a_is_system {
+                            cmp::Ordering::Greater
+                        } else {
+                            LANGUAGE_SORTER.compare(&a.1.info.name, &b.1.info.name)
+                        }
+                    });
+                    // Refresh installed results if on that page
+                    return Task::batch([
+                        self.installed_results(),
+                        self.update_homebrew_updates(),
+                    ]);
+                }
+            }
+            Message::HomebrewUpdates(homebrew_packages) => {
+                // Merge homebrew updates into updates list
+                if let Some(updates) = &mut self.updates {
+                    for package in homebrew_packages {
+                        updates.push(("homebrew", package));
+                    }
+                    // Re-sort with system packages first
+                    updates.sort_unstable_by(|a, b| {
+                        if a.1.id.is_system() {
+                            cmp::Ordering::Less
+                        } else if b.1.id.is_system() {
+                            cmp::Ordering::Greater
+                        } else {
+                            LANGUAGE_SORTER.compare(&a.1.info.name, &b.1.info.name)
+                        }
+                    });
+                }
+            }
             Message::Installed(installed) => {
                 self.installed = Some(installed);
                 self.waiting_installed.clear();
