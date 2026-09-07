@@ -98,6 +98,27 @@ pub const ICON_SIZE_DETAILS: u16 = 128;
 pub const MAX_GRID_WIDTH: f32 = 1600.0;
 pub const MAX_RESULTS: usize = 100;
 
+#[cfg(feature = "desktop")]
+fn preferred_gpu_idx(gpus: &[switcheroo_control::Gpu], prefers_discrete: bool) -> Option<usize> {
+    if prefers_discrete {
+        gpus.iter()
+            .position(|gpu| gpu.default && gpu.discrete)
+            .or_else(|| gpus.iter().position(|gpu| gpu.discrete))
+            .or_else(|| gpus.iter().position(|gpu| !gpu.default))
+    } else {
+        gpus.iter().position(|gpu| gpu.default)
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn automatic_gpu_idx(gpus: &[switcheroo_control::Gpu], prefers_discrete: bool) -> Option<usize> {
+    if !prefers_discrete || gpus.iter().any(|gpu| gpu.default && gpu.discrete) {
+        None
+    } else {
+        preferred_gpu_idx(gpus, true)
+    }
+}
+
 #[derive(Debug, Default, Parser)]
 struct Cli {
     subcommand_opt: Option<String>,
@@ -479,16 +500,20 @@ impl App {
         }
 
         async fn try_get_gpu_envs(gpu: GpuPreference) -> Option<HashMap<String, String>> {
+            if matches!(gpu, GpuPreference::Default) {
+                return None;
+            }
+
             let connection = zbus::Connection::system().await.ok()?;
             let proxy = switcheroo_control::SwitcherooControlProxy::new(&connection)
                 .await
                 .ok()?;
             let gpus = proxy.get_gpus().await.ok()?;
-            match gpu {
-                GpuPreference::Default => gpus.into_iter().find(|gpu| gpu.default),
-                GpuPreference::NonDefault => gpus.into_iter().find(|gpu| !gpu.default),
-            }
-            .map(|gpu| gpu.environment)
+            let gpu_idx = match gpu {
+                GpuPreference::Default => automatic_gpu_idx(&gpus, false),
+                GpuPreference::NonDefault => automatic_gpu_idx(&gpus, true),
+            }?;
+            gpus.into_iter().nth(gpu_idx).map(|gpu| gpu.environment)
         }
 
         tokio::task::spawn_blocking(move || {
